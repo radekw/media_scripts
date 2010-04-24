@@ -35,13 +35,13 @@ except:
     _xmpp_available = False
 
 _shows = {'Klan': 33, 
-          'Na Dobre i na Zle': 50, 
-          'M jak Milosc': 51, 
-          'Barwy Szczescia': 297, 
-          'Ojciec Mateusz': 301, 
-          'Czas Honoru': 304, 
-          'Rajskie Klimaty': 372, 
-          'Programy Informacyjne': 61}
+          'Na dobre i na zle': 50, 
+          'M jak milosc': 51, 
+          'Barwy szczescia': 297, 
+          'Ojciec mateusz': 301, 
+          'Czas honoru': 304, 
+          'Rajskie klimaty': 372, 
+          'Programy informacyjne': 61}
 
 ########################################
 def usage():
@@ -141,7 +141,12 @@ def login():
 
 ########################################
 def get_shows(br, title):
-    
+    logger = logging.getLogger()
+    try:
+        path = _shows[title]
+    except KeyError:
+        logger.error('Unknown path to show')
+        return
     
     res = br.open('http://www.tvpolonia.com/player/')
     html = res.read()
@@ -151,60 +156,26 @@ def get_shows(br, title):
     else:
         logger.error('cannot get base movie URL')
         sys.exit(2)
-    
-    
     # mms://tvpol.wmod.llnwd.net/fc/a295/o2/FILES/?WMContentBitrate=000
-    
-    
-    fields = (('cat_offset', '0'), ('movie_offset', '0'), ('path', '33'))
-    data = urllib.urlencode(fields)
-    res = br.open('http://www.tvpolonia.com/player/categories.php?cat_offset=0&movie_offset=0&path=33', data)
-    html = res.read()
-    
-    """
-      <ul class="subMenu">        <li>
-          <a onmouseover=
-          "javascript:this.style.cursor=\'pointer\';Over(\'categories/1170955594.jpg\', document.getElementById(\'moviedesc1\').innerHTML, \'Klan /1860\',document.getElementById(\'moviedesc21\').innerHTML)"
-          onmouseout="javascript:Out()" onclick=
-          "loadmovie(\'Klan /1860\',document.getElementById(\'moviedesc1\').innerHTML,document.getElementById(\'moviedesc21\').innerHTML,\'721652898.wmv\',\'17830\',\'1\');">
-          &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Klan /1860</a>
-
-          <div id="moviedesc1" style="display:none;">
-            <br>
-            Klan odc.1860
-          </div>
-
-          <div id="moviedesc21" style="display:none;">
-            Ilo&#347;&#263; wy&#347;wietle&#324;: 3771, Od: 23-04-2010, 08:15
-            E.T.          </div>
-        </li>
-        <li>
-          <a onmouseover=
-          "javascript:this.style.cursor=\'pointer\';Over(\'categories/1170955594.jpg\', document.getElementById(\'moviedesc11\').innerHTML, \'Klan /1850\',document.getElementById(\'moviedesc211\').innerHTML)"
-          onmouseout="javascript:Out()" onclick=
-          "loadmovie(\'Klan /1850\',document.getElementById(\'moviedesc11\').innerHTML,document.getElementById(\'moviedesc211\').innerHTML,\'863160903.wmv\',\'17526\',\'1\');">
-          &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Klan /1850</a>
-          <div id="moviedesc11" style="display:none;">
-            <br>
-            Klan odc.1850          </div>
-
-          <div id="moviedesc211" style="display:none;">
-            Ilo&#347;&#263; wy&#347;wietle&#324;: 7658, Od: 02-04-2010, 08:10
-            E.T.
-          </div>
-        </li>
-      </ul><br class="clear">
-      <a onmouseover="this.style.cursor=\'pointer\';" class="nextBtn" onclick=
-      "showcatmenu(actTitle,actDescr,actDescr2,actImage,33,0,11);"><strong>Next</strong></a>
-    </li>
-  </ul>
-
-    """
-    
     # mms://tvpol.wmod.llnwd.net/fc/a295/o2/FILES/721652898.wmv?WMContentBitrate=280000
     # mms://tvpol.wmod.llnwd.net/fc/a295/o2/FILES/721652898.wmv?WMContentBitrate=750000
     
+    fields = (('cat_offset', '0'), ('movie_offset', '0'), ('path', '%s' % path))
+    query_string = '?cat_offset=0&movie_offset=0&path=%s' % path
+    post_data = urllib.urlencode(fields)
+    res = br.open('http://www.tvpolonia.com/player/categories.php%s' % query_string, 
+                  post_data)
+    html = res.read()
     
+    names = re.findall(r"loadmovie\('(Klan\s/\d+)", html)
+    files = re.findall(r"innerHTML,'(\d+\.wmv)", html)
+    
+    for name, file in zip(names, files):
+        logger.debug('found %s: %s' % (name, file))
+        
+    
+    
+    return
     
     for show in shows:
         season = 1
@@ -405,9 +376,6 @@ def main():
     if opt_query:
         br = login()
         get_shows(br, 'Klan')
-        get_shows(br, 'Barwy Szczescia')
-        get_shows(br, 'M jak Milosc')
-        get_shows(br, 'Na Dobre i na Zle')
     if opt_download:
         download()
     
