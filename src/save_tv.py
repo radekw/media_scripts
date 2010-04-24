@@ -1,6 +1,5 @@
 #!/usr/bin/python
-
-# Copyright [2009] [Radek Wierzbicki]
+# Copyright [2010] [Radek Wierzbicki]
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,15 +12,32 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-   
-import os, shutil, sys, signal, subprocess, getopt
+
+"""
+This script downloads TV shows from German online VCR recorder - save.tv
+You need to have an account and pay for the service in order to user this script.
+It's quick, dirty, without much error checking, and without warranty.
+If it fails, PECH!
+"""
+
+import os, shutil, sys, signal, subprocess, getopt, time, random
 import re, logging, urllib2, sqlite3
 from ConfigParser import SafeConfigParser
 from stat import *
-import mechanize, ClientForm
+import mechanize
 from hashlib import sha1
 from os import urandom
-import prowlpy, xmpp
+
+_prowl_available = True
+try:
+    import prowlpy
+except:
+    _prowl_available = False
+_xmpp_available = True
+try:
+    import xmpp
+except:
+    _xmpp_available = False
 
 ########################################
 def usage():
@@ -36,23 +52,26 @@ def usage():
 
 ########################################
 class Show:
+    """
+    This class stores all information about a show in sqlite database
+    """
     NEW = 'new'
     DOWNLOADED = 'downloaded'
     DOWNLOADING = 'downloading'
     ERROR = 'error'
-    def __init__(self, id, title, date, time, url, telecastid, size, status):
+    def __init__(self, id, title, dt, tm, url, telecastid, size, status):
         if id == None:
-            self.id = generate_unique_id('%s%s%s' % (title, date, time))
+            self.id = generate_unique_id('%s%s%s' % (title, dt, tm))
         else:
             self.id = id
         self.title = title
-        self.date = date
-        self.time = time
+        self.date = dt
+        self.time = tm
         self.url = url
         self.telecastid = telecastid
         self.size = int(size)
         self.status = status
-        self.titleD = '%s.%s' % (title.replace(' ', '.'), date)
+        self.titleD = '%s.%s' % (title.replace(' ', '.'), dt)
         self.filename = '%s.avi' % self.titleD
     def insert(self):
         sql = 'insert or ignore into shows '
@@ -78,6 +97,9 @@ class Show:
     
 ########################################
 def can_i_run():
+    """
+    Checks if the process is already running
+    """
     out = subprocess.Popen(['ps', 'hx'], stdout=subprocess.PIPE).communicate()[0]
     c = 0
     process = os.path.basename(sys.argv[0])
@@ -90,6 +112,9 @@ def can_i_run():
 
 ########################################
 def generate_unique_id(text=None, l=10):
+    """
+    Generates a unique string based on given text or random string
+    """
     if l > 40:
         l = 40
     if text is None:
@@ -98,6 +123,9 @@ def generate_unique_id(text=None, l=10):
 
 ########################################
 def connect_to_sqlite():
+    """
+    Connects to sqlite database or create it if does not exists
+    """
     f = os.path.join(_config.get('directories', 'storage'), 'save_tv.sqlite')
     c = sqlite3.connect(f)
     s = 'CREATE TABLE IF NOT EXISTS shows '
@@ -109,10 +137,18 @@ def connect_to_sqlite():
     
 ########################################
 def fix_db():
+    """
+    TODO: implement
+    Checks if sqlite database contains shows with status 'downloading'
+    that are not being downloaded anymore (after crash)
+    """
     pass
 
 ########################################
 def deumlaut(s):
+    """
+    Replaces umlauts with fake-umlauts
+    """
     s = s.replace('\xdf', 'ss')
     s = s.replace('\xfc', 'ue')
     s = s.replace('\xdc', 'Ue')
@@ -124,18 +160,25 @@ def deumlaut(s):
 
 ########################################
 def fix_filename(s):
+    """
+    Fixes the file name: remove the user name, replace double underscores
+    """
     s = s.replace('_%s' % _config.get('login', 'username'), '')
+    s = s.replace('__', '_')
     return s
 
 ########################################
 def login():
+    """
+    Opens login page, log in, and return the mechanize browser instance
+    """
     logger = logging.getLogger()
     br = mechanize.Browser()
-    br.addheaders = [('User-agent', 'Firefox/3.0.14')]
+    br.addheaders = [('User-agent', _config.get('browser', 'useragent'))]
 
     logger.info('logging on')
     br.open('%s/%s' % (_url_site, '/STV/S/obj/user/usShowLogin.cfm'))
-    br.select_form(name='loginFrm')
+    br.select_form(nr=0)
     br['sUsername'] = _config.get('login', 'username')
     br['sPassword'] = _config.get('login', 'password')
     res = br.submit()
@@ -144,43 +187,76 @@ def login():
 
 ########################################
 def query(br):
+    """
+    Finds all available shows, gets the info, and inserts into sqlite database
+    """
     logger = logging.getLogger()
+    random.seed()
     
+    # Open 'Mein Videoarchiv' and find all links that contain TelecastID
+    # Store all links in shows list
     logger.info('getting show listing')
     shows = []
     br.open('%s/%s' % (_url_site, '/STV/M/obj/user/usShowVideoArchive.cfm'))
     try:
-        links = br.links(url_regex=r'ShowDownload\.cfm')
+        links = br.links(url_regex=r'TelecastID')
     except mechanize._mechanize.LinkNotFoundError:
-        logger.error('ShowDownload links not found')
+        logger.error('TelecastID links not found')
         return
     for link in links:
         shows.append('%s/%s' % (_url_site, link.url))
     
+    # Get TelecastID out of every link and access web service to obtain
+    # download URL
     logger.info('getting show links')
     links = []
-    re_tid = re.compile(r'.+TelecastID=(\d+)&.+')
+    re_tid = re.compile(r'.+TelecastID=(\d+)$')
+    re_url = re.compile(r".+'(http://.+dl)'.+", re.S)
     for show in shows:
         logger.debug(show)
-        br.open(show)
-        try:
-            dl = br.find_link(url_regex=r'm=dl')
-        except mechanize._mechanize.LinkNotFoundError:
-            logger.error('download link not found')
-            continue
-        i = dl.url.find('http://')
-        u = dl.url[i:-1]
+        tid = None
+        url = None
         m = re_tid.match(show)
         if m:
             tid = m.group(1)
         else:
-            m = ''
-        links.append((u, tid))
-
+            continue
+        if tid:
+            logger.debug('found tid: %s' % tid)
+            ts = '%s_%s%s' % (random.randint(1000,9999), 
+                              str(time.time())[:10], 
+                              random.randint(100, 999))
+            u = '%s/%s' % (_url_site, 
+                         '/STV/M/obj/cRecordOrder/croGetDownloadUrl.cfm')
+            u += '?null.GetDownloadUrl'
+            u += '&=&ajax=true'
+            u += '&c0-id=%s' % ts
+            u += '&c0-methodName=GetDownloadUrl'
+            u += '&c0-param0=number%%3A%s' % tid
+            u += '&c0-param1=number%3A0'
+            u += '&c0-param2=boolean%3Afalse'
+            u += '&c0-scriptName=null'
+            u += '&callCount=1'
+            u += '&clientAuthenticationKey='
+            u += '&xml=true'
+            logger.debug('url getter url: %s' % u)
+            ret = br.open(u)
+            html = ret.read()
+            m = re_url.match(html)
+            if m:
+                url = m.group(1)
+                logger.debug('found url: %s' % url)
+        if tid and url:
+            links.append((url, tid))
+    
+    # Only connect to download URL just to get file information such as
+    # file name, file size, date, time
+    # Does not download the file just yet
     logger.info('getting show details')
-    re_tdt = re.compile(r'(.+)_{1,2}(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2})')
+    re_tdt = re.compile(r'(.+)_{1,2}(\d{2}-\d{2}-\d{4})_(\d{2})(\d{2})')
     for link, tid in links:
-        req = urllib2.Request(link, headers={'User-agent': 'Firefox/3.0.14'})
+        req = urllib2.Request(link, headers={'User-agent': 
+                                             _config.get('browser', 'useragent')})
         doc = urllib2.urlopen(req)
         info = doc.info()
         try:
@@ -190,17 +266,17 @@ def query(br):
             logger.error('key error in info')
             continue
         doc.close()
-        filename = str(fix_filename(deumlaut(filename))).replace('__', '_')
+        filename = str(fix_filename(deumlaut(filename)))
         match = re_tdt.match(filename)
         if match:
             title = match.group(1)
-            date = match.group(2)
-            time = match.group(3).replace('-', ':')
+            dt = match.group(2)
+            tm = '%s:%s' % (match.group(3), match.group(4))
         else:
             title = filename
-            date = '00-00-00'
-            time = '00:00'
-        s = Show(None, title, date, time, link, tid, size, Show.NEW)
+            dt = '00-00-00'
+            tm = '00:00'
+        s = Show(None, title, dt, tm, link, tid, size, Show.NEW)
         logger.info('%s' % s.titleD)
         logger.debug('%s' % s.url)
         s.insert()
@@ -217,7 +293,7 @@ def download():
     
     sql = 'select id, title, date, time, url, telecastid, size, status from shows '
     sql += 'where status = "new" or status = "error" '
-    sql += 'order by title, date, time'
+    sql += 'order by date, time, title'
     cursor = _database.cursor()
     cursor.execute(sql)
     shows = []
@@ -260,7 +336,11 @@ def download():
         f = open(tmp_outfile, 'w')
         f.close()
         wget_log = os.path.join(_config.get('directories', 'tmp'), 'wget.log')
-        ret = os.system('wget -c %s -O %s -o %s' % (show.url, tmp_outfile, wget_log));
+        user_agent = _config.get('browser', 'useragent')
+        ret = os.system('wget -c %s -O %s -o %s -U "%s"' % (show.url, 
+                                                            tmp_outfile, 
+                                                            wget_log, 
+                                                            user_agent));
         if os.WIFEXITED(ret):
             if os.WEXITSTATUS(ret) != 0:
                 logger.error('wget exited with error')
@@ -276,6 +356,8 @@ def download():
             shutil.move(tmp_outfile, outfile)
         except:
             logger.error('cannot move downloaded file')
+            show.update_status(Show.ERROR)
+            return
         show.update_status(Show.DOWNLOADED)
         msg = 'Downloaded %s' % show.titleD
         prowl(msg)
@@ -283,6 +365,8 @@ def download():
 
 ########################################
 def prowl(msg):
+    if not _prowl_available:
+        return
     try:
         apikey = _config.get('prowl', 'apikey')
     except:
@@ -298,6 +382,8 @@ def prowl(msg):
 
 ########################################
 def send_xmpp(msg):
+    if not _xmpp_available:
+        return
     try:
         buddy = _config.get('xmpp', 'buddy')
         xuser = _config.get('xmpp', 'username')
@@ -324,6 +410,7 @@ def cleanup():
 
 ########################################
 def exit_handler(signum, stackframe):
+    logger = logging.getLogger()
     logger.info('killed')
     cleanup()
 
