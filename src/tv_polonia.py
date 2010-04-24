@@ -22,13 +22,26 @@ from stat import *
 import mechanize
 from hashlib import sha1
 from os import urandom
-import prowlpy, xmpp
+
+_prowl_available = True
+try:
+    import prowlpy
+except:
+    _prowl_available = False
+_xmpp_available = True
+try:
+    import xmpp
+except:
+    _xmpp_available = False
 
 _shows = {'Klan': 33, 
           'Na Dobre i na Zle': 50, 
           'M jak Milosc': 51, 
           'Barwy Szczescia': 297, 
-          'Dom nad Rozlewiskiem': 364}
+          'Ojciec Mateusz': 301, 
+          'Czas Honoru': 304, 
+          'Rajskie Klimaty': 372, 
+          'Programy Informacyjne': 61}
 
 ########################################
 def usage():
@@ -115,7 +128,7 @@ def connect_to_sqlite():
 def login():
     logger = logging.getLogger()
     br = mechanize.Browser()
-    br.addheaders = [('User-agent', 'Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10.6; en-US; rv:1.9.1.6) Gecko/20091201 Firefox/3.5.6')]
+    br.addheaders = [('User-agent', _config.get('browser', 'useragent'))]
 
     logger.info('logging in')
     br.open('https://www.tvpolonia.com/ab/')
@@ -127,65 +140,76 @@ def login():
     return br
 
 ########################################
-def get_movie_url_base(br):
-    logger = logging.getLogger()
-    link = 'http://www.tvpolonia.com/player/'
-    logger.debug('opening link: %s' % link)
-    br.open(link)
-    doc = br.response().read()
-    match = re.match(r'.+innerHTML =.+\'(mms:\/\/.+FILES\/).+bitrate', doc, re.S)
+def get_shows(br, title):
+    
+    
+    res = br.open('http://www.tvpolonia.com/player/')
+    html = res.read()
+    match = re.match(r'.+(mms://.+Bitrate=000).+', html, re.S)
     if match:
-        burl = match.group(1)
+        base = match.group(1)
     else:
         logger.error('cannot get base movie URL')
         sys.exit(2)
-    return burl
     
-########################################
-def get_shows(br, title):
-    burl = get_movie_url_base(br)
     
+    # mms://tvpol.wmod.llnwd.net/fc/a295/o2/FILES/?WMContentBitrate=000
+    
+    
+    fields = (('cat_offset', '0'), ('movie_offset', '0'), ('path', '33'))
+    data = urllib.urlencode(fields)
+    res = br.open('http://www.tvpolonia.com/player/categories.php?cat_offset=0&movie_offset=0&path=33', data)
+    html = res.read()
+    
+    """
+      <ul class="subMenu">        <li>
+          <a onmouseover=
+          "javascript:this.style.cursor=\'pointer\';Over(\'categories/1170955594.jpg\', document.getElementById(\'moviedesc1\').innerHTML, \'Klan /1860\',document.getElementById(\'moviedesc21\').innerHTML)"
+          onmouseout="javascript:Out()" onclick=
+          "loadmovie(\'Klan /1860\',document.getElementById(\'moviedesc1\').innerHTML,document.getElementById(\'moviedesc21\').innerHTML,\'721652898.wmv\',\'17830\',\'1\');">
+          &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Klan /1860</a>
 
-########################################
-def query_seriale(br, title, full_title):
-    logger = logging.getLogger()
-    logger.info('getting "%s"' % full_title)
+          <div id="moviedesc1" style="display:none;">
+            <br>
+            Klan odc.1860
+          </div>
+
+          <div id="moviedesc21" style="display:none;">
+            Ilo&#347;&#263; wy&#347;wietle&#324;: 3771, Od: 23-04-2010, 08:15
+            E.T.          </div>
+        </li>
+        <li>
+          <a onmouseover=
+          "javascript:this.style.cursor=\'pointer\';Over(\'categories/1170955594.jpg\', document.getElementById(\'moviedesc11\').innerHTML, \'Klan /1850\',document.getElementById(\'moviedesc211\').innerHTML)"
+          onmouseout="javascript:Out()" onclick=
+          "loadmovie(\'Klan /1850\',document.getElementById(\'moviedesc11\').innerHTML,document.getElementById(\'moviedesc211\').innerHTML,\'863160903.wmv\',\'17526\',\'1\');">
+          &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Klan /1850</a>
+          <div id="moviedesc11" style="display:none;">
+            <br>
+            Klan odc.1850          </div>
+
+          <div id="moviedesc211" style="display:none;">
+            Ilo&#347;&#263; wy&#347;wietle&#324;: 7658, Od: 02-04-2010, 08:10
+            E.T.
+          </div>
+        </li>
+      </ul><br class="clear">
+      <a onmouseover="this.style.cursor=\'pointer\';" class="nextBtn" onclick=
+      "showcatmenu(actTitle,actDescr,actDescr2,actImage,33,0,11);"><strong>Next</strong></a>
+    </li>
+  </ul>
+
+    """
     
-    l = get_links_with_onclick(br, '', re.compile(r'.*movie_offset=.*'), 
-                               re.compile(r'.*Seriale \(uaktualniane\).*'))
-    if not l:
-        return
-    next = get_location_from_onclick(l[0])
-    if not next:
-        return
+    # mms://tvpol.wmod.llnwd.net/fc/a295/o2/FILES/721652898.wmv?WMContentBitrate=280000
+    # mms://tvpol.wmod.llnwd.net/fc/a295/o2/FILES/721652898.wmv?WMContentBitrate=750000
     
-    l = get_links_with_onclick(br, next, re.compile(r'.*movie_offset=.*'), 
-                               re.compile(r'.*%s.*' % title))
-    if not l:
-        return
-    next = get_location_from_onclick(l[0])
-    if not next:
-        return
     
-    l = get_links_with_onclick(br, next, re.compile(r'.*mov=.*'), 
-                               re.compile(r'.*\s\/\d+.*'))
-    if not l:
-        return
-    shows = get_shows_from_links(l)
-    if not shows:
-        return
     
     for show in shows:
         season = 1
         episode = show[0]
         show_url = show[1]
-        l = get_links_with_onclick(br, show_url, re.compile(r'.*mms://.*'), 
-                                   re.compile(r'.*w WMP.*'))
-        if not l:
-            continue
-        link = get_location_from_onclick(l[0], '"')
-        if not link:
-            continue
         s = Show(None, full_title, season, episode, link, Show.NEW)
         logger.info('found %s' % s.titleSE)
         s.insert()
@@ -250,6 +274,8 @@ def download():
 
 ########################################
 def prowl(msg):
+    if not _prowl_available:
+        return
     try:
         apikey = _config.get('prowl', 'apikey')
     except:
@@ -265,6 +291,8 @@ def prowl(msg):
 
 ########################################
 def send_xmpp(msg):
+    if not _xmpp_available:
+        return
     try:
         buddy = _config.get('xmpp', 'buddy')
         xuser = _config.get('xmpp', 'username')
@@ -380,7 +408,6 @@ def main():
         get_shows(br, 'Barwy Szczescia')
         get_shows(br, 'M jak Milosc')
         get_shows(br, 'Na Dobre i na Zle')
-        get_shows(br, 'Dom nad Rozlewiskiem')
     if opt_download:
         download()
     
