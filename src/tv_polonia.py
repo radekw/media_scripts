@@ -157,7 +157,6 @@ def get_shows(br, title):
         logger.error('cannot get base movie URL')
         sys.exit(2)
     # mms://tvpol.wmod.llnwd.net/fc/a295/o2/FILES/?WMContentBitrate=000
-    # mms://tvpol.wmod.llnwd.net/fc/a295/o2/FILES/721652898.wmv?WMContentBitrate=280000
     # mms://tvpol.wmod.llnwd.net/fc/a295/o2/FILES/721652898.wmv?WMContentBitrate=750000
     
     fields = (('cat_offset', '0'), ('movie_offset', '0'), ('path', '%s' % path))
@@ -167,22 +166,17 @@ def get_shows(br, title):
                   post_data)
     html = res.read()
     
-    names = re.findall(r"loadmovie\('(Klan\s/\d+)", html)
+    episodes = re.findall(r"loadmovie\('.+?\s/(\d+)'", html)
     files = re.findall(r"innerHTML,'(\d+\.wmv)", html)
     
-    for name, file in zip(names, files):
-        logger.debug('found %s: %s' % (name, file))
-        
-    
-    
-    return
-    
-    for show in shows:
-        season = 1
-        episode = show[0]
-        show_url = show[1]
-        s = Show(None, full_title, season, episode, link, Show.NEW)
+    re_episode = re.compile(r'.+\/(\d+)')
+    for episode, file in zip(episodes, files):
+        episode = int(episode)
+        url = base.replace('000', '750000')
+        url = url.replace('?', '%s?' % file)
+        s = Show(None, title, 1, episode, url, Show.NEW)
         logger.info('found %s' % s.titleSE)
+        logger.debug('url: %s' % url)
         s.insert()
     
 ########################################
@@ -376,6 +370,12 @@ def main():
     if opt_query:
         br = login()
         get_shows(br, 'Klan')
+        get_shows(br, 'M jak milosc')
+        get_shows(br, 'Na dobre i na zle')
+        get_shows(br, 'Barwy szczescia')
+        get_shows(br, 'Czas honoru')
+        get_shows(br, 'Ojciec mateusz')
+        get_shows(br, 'Rajskie klimaty')
     if opt_download:
         download()
     
