@@ -35,13 +35,14 @@ except:
     _xmpp_available = False
 
 _shows = {'Klan': 33, 
-          'Na dobre i na zle': 50, 
-          'M jak milosc': 51, 
-          'Barwy szczescia': 297, 
-          'Ojciec mateusz': 301, 
-          'Czas honoru': 304, 
-          'Rajskie klimaty': 372, 
-          'Programy informacyjne': 61}
+          'Na Dobre i na Zle': 50, 
+          'M jak Milosc': 51, 
+          'Barwy Szczescia': 297, 
+          'Ojciec Mateusz': 301, 
+          'Czas Honoru': 304, 
+          'Rajskie Klimaty': 372, 
+          'Teleexpress': 61, 
+          'Wiadomosci': 61}
 
 ########################################
 def usage():
@@ -60,34 +61,33 @@ class Show:
     DOWNLOADED = 'downloaded'
     DOWNLOADING = 'downloading'
     ERROR = 'error'
-    def __init__(self, id, title, season, episode, url, status):
+    def __init__(self, id, title, episode, url, status):
         if id == None:
-            self.id = generate_unique_id('%s%s%s' % (title, season, episode))
+            self.id = generate_unique_id('%s%s' % (title, episode))
         else:
             self.id = id
         self.title = title
-        self.season = season
         self.episode = episode
         self.url = url
         self.status = status
-        self.titleSE = '%s.S%02dE%02d' % (title.replace(' ', '.'), 
-                                         season, episode)
+        if episode != 0:
+            self.titleSE = '%s.%02d' % (title.replace(' ', '.'), episode)
+        else:
+            self.titleSE = '%s' % title.replace(' ', '.')
         self.filename = '%s.wmv' % self.titleSE
     def insert(self):
         sql = 'insert or ignore into shows '
-        sql += '(id, title, season, episode, url, status) '
-        sql += 'values (?, ?, ?, ?, ?, ?)'
-        t = (self.id, self.title, self.season, 
-             self.episode, self.url, self.status)
+        sql += '(id, title, episode, url, status) '
+        sql += 'values (?, ?, ?, ?, ?)'
+        t = (self.id, self.title, self.episode, self.url, self.status)
         _database.execute(sql, t)
         _database.commit()
     def update(self):
         sql = 'update shows '
-        sql += 'set title = ?, season = ?, episode = ?, '
+        sql += 'set title = ?, episode = ?, '
         sql += 'url = ?, status = ? '
         sql += 'where id = ?'
-        t = (self.title, self.season, self.episode, 
-             self.url, self.status, self.id)
+        t = (self.title, self.episode, self.url, self.status, self.id)
         _database.execute(sql, t)
         _database.commit()
     def update_status(self, status):
@@ -120,7 +120,7 @@ def connect_to_sqlite():
     c = sqlite3.connect(f)
     s = 'CREATE TABLE IF NOT EXISTS shows '
     s += '(id text primary key, title text, '
-    s += 'season integer, episode integer, url text, status text);'
+    s += 'episode integer, url text, status text);'
     c.execute(s)
     return c
     
@@ -140,13 +140,8 @@ def login():
     return br
 
 ########################################
-def get_shows(br, title):
+def get_base_url(br):
     logger = logging.getLogger()
-    try:
-        path = _shows[title]
-    except KeyError:
-        logger.error('Unknown path to show')
-        return
     
     res = br.open('http://www.tvpolonia.com/player/')
     html = res.read()
@@ -158,6 +153,11 @@ def get_shows(br, title):
         sys.exit(2)
     # mms://tvpol.wmod.llnwd.net/fc/a295/o2/FILES/?WMContentBitrate=000
     # mms://tvpol.wmod.llnwd.net/fc/a295/o2/FILES/721652898.wmv?WMContentBitrate=750000
+    return base
+
+########################################
+def get_shows_html(br, path):
+    logger = logging.getLogger()
     
     fields = (('cat_offset', '0'), ('movie_offset', '0'), ('path', '%s' % path))
     query_string = '?cat_offset=0&movie_offset=0&path=%s' % path
@@ -165,16 +165,61 @@ def get_shows(br, title):
     res = br.open('http://www.tvpolonia.com/player/categories.php%s' % query_string, 
                   post_data)
     html = res.read()
+    return html
+
+########################################
+def get_seriale(br, title):
+    logger = logging.getLogger()
+    try:
+        path = _shows[title]
+    except KeyError:
+        logger.error('Unknown path to show')
+        return
     
+    base = get_base_url(br)
+    html = get_shows_html(br, path)
+    
+    # onClick="loadmovie('Klan /1855',
+    # document.getElementById('moviedesc6').innerHTML,
+    # document.getElementById('moviedesc26').innerHTML,'953658175.wmv','17638','1');
     episodes = re.findall(r"loadmovie\('.+?\s/(\d+)'", html)
     files = re.findall(r"innerHTML,'(\d+\.wmv)", html)
     
-    re_episode = re.compile(r'.+\/(\d+)')
     for episode, file in zip(episodes, files):
         episode = int(episode)
         url = base.replace('000', '750000')
         url = url.replace('?', '%s?' % file)
-        s = Show(None, title, 1, episode, url, Show.NEW)
+        s = Show(None, title, episode, url, Show.NEW)
+        logger.info('found %s' % s.titleSE)
+        logger.debug('url: %s' % url)
+        s.insert()
+
+########################################
+def get_wiadomosci(br, title):
+    logger = logging.getLogger()
+    try:
+        path = _shows[title]
+    except KeyError:
+        logger.error('Unknown path to show')
+        return
+    
+    base = get_base_url(br)
+    html = get_shows_html(br, path)
+    
+    # onClick="loadmovie('Teleexpress 22/4/10',
+    # document.getElementById('moviedesc8').innerHTML,
+    # document.getElementById('moviedesc28').innerHTML,'474434522.wmv','17820','0');
+    all = re.findall(r"loadmovie\('%s.+?\s(\d{1,2})/(\d{1,2})/(\d{2})'.+?innerHTML,'(\d+\.wmv)" % title[:4], html)
+    
+    for d, m, y, file in all:
+        d = int(d)
+        m = int(m)
+        y = int(y)
+        date = '20%02d%02d%02d' % (y, m, d)
+        episode = int(date)
+        url = base.replace('000', '280000')
+        url = url.replace('?', '%s?' % file)
+        s = Show(None, title, episode, url, Show.NEW)
         logger.info('found %s' % s.titleSE)
         logger.debug('url: %s' % url)
         s.insert()
@@ -183,14 +228,14 @@ def get_shows(br, title):
 def download():
     logger = logging.getLogger()
 
-    sql = 'select id, title, season, episode, url, status from shows '
+    sql = 'select id, title, episode, url, status from shows '
     sql += 'where status = "new" or status = "error" '
-    sql += 'order by title, season, episode'
+    sql += 'order by title, episode'
     cursor = _database.cursor()
     cursor.execute(sql)
     shows = []
     for row in cursor:
-        show = Show(row[0], row[1], row[2], row[3], row[4], row[5])
+        show = Show(row[0], row[1], row[2], row[3], row[4])
         shows.append(show)
     cursor.close()
     
@@ -199,8 +244,11 @@ def download():
         return
 
     for show in shows:
-        outfile = os.path.join(_config.get('directories', 'storage'), 
-                               show.filename)
+        outdir = os.path.join(_config.get('directories', 'storage'), 
+                               show.title)
+        if not os.path.exists(outdir):
+            os.mkdir(outdir)
+        outfile = os.path.join(outdir, show.filename)
         tmp_outfile = os.path.join(_config.get('directories', 'tmp'), 
                                    show.filename)
 
@@ -369,13 +417,15 @@ def main():
     
     if opt_query:
         br = login()
-        get_shows(br, 'Klan')
-        get_shows(br, 'M jak milosc')
-        get_shows(br, 'Na dobre i na zle')
-        get_shows(br, 'Barwy szczescia')
-        get_shows(br, 'Czas honoru')
-        get_shows(br, 'Ojciec mateusz')
-        get_shows(br, 'Rajskie klimaty')
+        get_seriale(br, 'Klan')
+        get_seriale(br, 'M jak Milosc')
+        get_seriale(br, 'Na Dobre i na Zle')
+        get_seriale(br, 'Barwy Szczescia')
+        get_seriale(br, 'Czas Honoru')
+        get_seriale(br, 'Ojciec Mateusz')
+        get_seriale(br, 'Rajskie Klimaty')
+        get_wiadomosci(br, 'Teleexpress')
+        get_wiadomosci(br, 'Wiadomosci')
     if opt_download:
         download()
     
