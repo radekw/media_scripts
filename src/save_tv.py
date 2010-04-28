@@ -51,6 +51,26 @@ def usage():
     sys.exit(os.EX_USAGE)
 
 ########################################
+class Shows:
+    def __init__(self, statuses=[]):
+        self.shows = []
+        sql = 'select id, title, date, time, url, telecastid, size, status, 
+        sql += 'status_update_time from shows '
+        if statuses:
+            sql += 'where '
+            for s in statuses:
+                sql += 'status = "%s" or ' % s
+            sql = sql.rstrip('or ')
+        sql += 'order by status_update_time'
+        cursor = _database.cursor()
+        cursor.execute(sql)
+        for row in cursor:
+            show = Show(row[0], row[1], row[2], row[3], 
+                        row[4], row[5], row[6], row[7], row[8])
+            self.shows.append(show)
+        cursor.close()
+
+########################################
 class Show:
     """
     This class stores all information about a show in sqlite database
@@ -60,7 +80,8 @@ class Show:
     DOWNLOADING = 'downloading'
     ERROR = 'error'
     DELETED = 'deleted'
-    def __init__(self, id, title, dt, tm, url, telecastid, size, status):
+    def __init__(self, id, title, dt, tm, url, telecastid, size, status, 
+                 status_update_time=None):
         if id == None:
             self.id = generate_unique_id('%s%s%s' % (title, dt, tm))
         else:
@@ -72,6 +93,7 @@ class Show:
         self.telecastid = telecastid
         self.size = int(size)
         self.status = status
+        self.status_update_time = status_update_time
         self.titleD = '%s.%s' % (title.replace(' ', '.'), dt)
         self.filename = '%s.avi' % self.titleD
     def insert(self):
@@ -92,6 +114,23 @@ class Show:
              self.telecastid, self.size, self.status, self.id)
         _database.execute(sql, t)
         _database.commit()
+    def _string_to_datetime(self, dtstring):
+        return datetime.strptime(dtstring, '%Y-%m-%d %H:%M:%S')
+    def get_status_update_datetime(self):
+        if self.status_update_time:
+            return self._string_to_datetime(self.status_update_time)
+        sql = 'select status_update_time where id = ?'
+        cursor = _database.cursor()
+        cursor.execute(sql, (self.id))
+        row = cursor.fetchone()
+        if row:
+            self.status_update_time = row[0]
+        else:
+            self.status_update_time = None
+        cursor.close()
+        if not self.satus_update_time:
+            return None
+        return self._string_to_datetime(self.status_update_time)
     def update_status(self, status):
         self.status = status
         self.update()
