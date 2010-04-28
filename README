@@ -1,0 +1,12 @@
+Scripts to download TV shows from paid sites: save.tv and tvpolonia.com
+
+DEPENDENCIES:
+Python 2.6: http://www.python.org/
+Mechanize 0.2.x: http://wwwsearch.sourceforge.net/mechanize/
+WGET: http://www.gnu.org/software/wget/
+MPlayer: http://www.mplayerhq.hu/
+
+optional:
+xmpppy: http://xmpppy.sourceforge.net/
+prowlpy: http://github.com/jacobb/prowlpy
+
