@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Copyright [2010] [Radek Wierzbicki]
+# Copyright 2010 Radek Wierzbicki
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ It's quick, dirty, without much error checking, and without warranty.
 If it fails, PECH!
 """
 
-import os, shutil, sys, signal, subprocess, getopt, time, random
+import os, shutil, sys, signal, subprocess, getopt, time, random, datetime
 import re, logging, urllib2, sqlite3
 from ConfigParser import SafeConfigParser
 from stat import *
@@ -51,6 +51,26 @@ def usage():
     sys.exit(os.EX_USAGE)
 
 ########################################
+class Shows:
+    def __init__(self, statuses=[]):
+        self.shows = []
+        sql = 'select id, title, date, time, url, telecastid, size, status, 
+        sql += 'status_update_time from shows '
+        if statuses:
+            sql += 'where '
+            for s in statuses:
+                sql += 'status = "%s" or ' % s
+            sql = sql.rstrip('or ')
+        sql += 'order by status_update_time'
+        cursor = _database.cursor()
+        cursor.execute(sql)
+        for row in cursor:
+            show = Show(row[0], row[1], row[2], row[3], 
+                        row[4], row[5], row[6], row[7], row[8])
+            self.shows.append(show)
+        cursor.close()
+
+########################################
 class Show:
     """
     This class stores all information about a show in sqlite database
@@ -59,7 +79,9 @@ class Show:
     DOWNLOADED = 'downloaded'
     DOWNLOADING = 'downloading'
     ERROR = 'error'
-    def __init__(self, id, title, dt, tm, url, telecastid, size, status):
+    DELETED = 'deleted'
+    def __init__(self, id, title, dt, tm, url, telecastid, size, status, 
+                 status_update_time=None):
         if id == None:
             self.id = generate_unique_id('%s%s%s' % (title, dt, tm))
         else:
@@ -71,6 +93,7 @@ class Show:
         self.telecastid = telecastid
         self.size = int(size)
         self.status = status
+        self.status_update_time = status_update_time
         self.titleD = '%s.%s' % (title.replace(' ', '.'), dt)
         self.filename = '%s.avi' % self.titleD
     def insert(self):
@@ -91,6 +114,23 @@ class Show:
              self.telecastid, self.size, self.status, self.id)
         _database.execute(sql, t)
         _database.commit()
+    def _string_to_datetime(self, dtstring):
+        return datetime.strptime(dtstring, '%Y-%m-%d %H:%M:%S')
+    def get_status_update_datetime(self):
+        if self.status_update_time:
+            return self._string_to_datetime(self.status_update_time)
+        sql = 'select status_update_time where id = ?'
+        cursor = _database.cursor()
+        cursor.execute(sql, (self.id))
+        row = cursor.fetchone()
+        if row:
+            self.status_update_time = row[0]
+        else:
+            self.status_update_time = None
+        cursor.close()
+        if not self.satus_update_time:
+            return None
+        return self._string_to_datetime(self.status_update_time)
     def update_status(self, status):
         self.status = status
         self.update()
@@ -282,11 +322,55 @@ def query(br):
         s.insert()
 
 ########################################
-def delete_downloaded(br):
+def remove_downloaded(br):
+    """
+    Removes shows from the website after they are downloaded
+    """
+    if not _config.getbool('save_tv', 'remove_after_download'):
+        return
+
     logger = logging.getLogger()
-    
-    logger.info('deleting downloaded shows')
-    
+    logger.info('removing downloaded shows from the website')
+
+    # Open 'Mein Videoarchiv'
+    # get telecastIDs for downloadable shows
+    logger.info('getting show listing')
+    br.open('%s/%s' % (_url_site, '/STV/M/obj/user/usShowVideoArchive.cfm'))
+    br.select_form(nr=0)
+
+    tids_site = set()
+    try:
+        links = br.links(url_regex=r'TelecastID')
+    except mechanize._mechanize.LinkNotFoundError:
+        logger.error('TelecastID links not found')
+        return
+    re_tid = re.compile(r'.+TelecastID=(\d+)$')
+    for link in links:
+        m = re_tid.match(link.url)
+        if m:
+            tids_site.add(m.group(1))
+
+    # get telecastIDs from the database for all downloaded shows
+    # intersect them with downloadable IDs
+    sql = 'select id, title, date, time, url, telecastid, size, status from shows '
+    sql += 'where status = "downloaded" '
+    sql += 'order by date, time, title'
+    cursor = _database.cursor()
+    cursor.execute(sql)
+    shows = []
+    for row in cursor:
+        show = Show(row[0], row[1], row[2], row[3], 
+                    row[4], row[5], row[6], row[7])
+        shows.append(show)
+    cursor.close()
+    tids = set()
+    for show in shows:
+        if show.telecastid in tids_site:
+            logger.info('removing %s' % show.titleD)
+            br.find_control(name='lTelecastID').get(tid).selected = True
+
+    br.submit()
+
 ########################################
 def download():
     logger = logging.getLogger()
@@ -363,6 +447,54 @@ def download():
         prowl(msg)
         send_xmpp(msg)
 
+########################################
+def delete_old_shows():
+    """
+    Deletes shows from disk after number of days configured in cfg file
+    """
+    Delete shows 
+    logger = logging.getLogger()
+    retain_days = _config.getint('directories', 'retain_days')
+    if retain_days == 0:
+        return
+
+    logger.info('deleting downloaded shows')
+
+    sql = 'select id, title, date, time, url, telecastid, size, status from shows '
+    sql += 'where status = "downloaded" '
+    sql += 'order by date, time, title'
+    cursor = _database.cursor()
+    cursor.execute(sql)
+    shows = []
+    for row in cursor:
+        show = Show(row[0], row[1], row[2], row[3], 
+                    row[4], row[5], row[6], row[7])
+        shows.append(show)
+    cursor.close()
+
+    today = datetime.date.today()
+
+    for show in shows:
+        try:
+            (d, m, y) = show.date.split('-')
+        except:
+            continue
+        show_date = datetime.date(y, m, d)
+        date_diff = today - show_date
+        if date_diff.days > retain_days:
+            outfile = os.path.join(_config.get('directories', 'storage'),
+                                   show.filename)
+            logger.info('deleting %s' % show.titleD)
+            if os.path.exists(outfile):
+                try:
+                    os.unlink(outfile)
+                except:
+                    logger.error('could not delete %s' % show.titleD)
+                    continue
+            else:
+                logger.debug('%s previously deleted' % show.titleD)
+            show.update_status(Show.DELETED)
+    
 ########################################
 def prowl(msg):
     if not _prowl_available:
@@ -499,6 +631,8 @@ def main():
         query(br)
     if opt_download:
         download()
+        remove_downloaded()
+        delete_old_shows()
     
     cleanup()
     

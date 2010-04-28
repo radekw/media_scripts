@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-# Copyright [2009] [Radek Wierzbicki]
+# Copyright 2010 Radek Wierzbicki
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
  
-import os, shutil, sys, signal, subprocess, getopt
+import os, shutil, sys, signal, subprocess, getopt, datetime
 import re, logging, sqlite3
 import urllib, urllib2
 from ConfigParser import SafeConfigParser
@@ -56,12 +56,33 @@ def usage():
     sys.exit(os.EX_USAGE)
 
 ########################################
+class Shows:
+    def __init__(self, statuses=[]):
+        self.shows = []
+        sql = 'select id, title, episode, url, status, status_update_time '
+        sql += 'from shows '
+        if statuses:
+            sql += 'where '
+            for s in statuses:
+                sql += 'status = "%s" or ' % s
+            sql = sql.rstrip('or ')
+        sql += 'order by status_update_time'
+        cursor = _database.cursor()
+        cursor.execute(sql)
+        for row in cursor:
+            show = Show(row[0], row[1], row[2], row[3], row[4], row[5])
+            self.shows.append(show)
+        cursor.close()
+
+########################################
 class Show:
     NEW = 'new'
     DOWNLOADED = 'downloaded'
     DOWNLOADING = 'downloading'
     ERROR = 'error'
-    def __init__(self, id, title, episode, url, status):
+    DELETED = 'deleted'
+    def __init__(self, id, title, episode, url, status, 
+                 status_update_time=None):
         if id == None:
             self.id = generate_unique_id('%s%s' % (title, episode))
         else:
@@ -70,6 +91,7 @@ class Show:
         self.episode = episode
         self.url = url
         self.status = status
+        self.status_update_time = status_update_time
         if episode != 0:
             self.titleSE = '%s.%02d' % (title.replace(' ', '.'), episode)
         else:
@@ -77,19 +99,37 @@ class Show:
         self.filename = '%s.wmv' % self.titleSE
     def insert(self):
         sql = 'insert or ignore into shows '
-        sql += '(id, title, episode, url, status) '
-        sql += 'values (?, ?, ?, ?, ?)'
+        sql += '(id, title, episode, url, status, status_update_time) '
+        sql += 'values (?, ?, ?, ?, ?, datetime("now", "localtime"))'
         t = (self.id, self.title, self.episode, self.url, self.status)
         _database.execute(sql, t)
         _database.commit()
     def update(self):
         sql = 'update shows '
         sql += 'set title = ?, episode = ?, '
-        sql += 'url = ?, status = ? '
+        sql += 'url = ?, status = ?, '
+        sql += 'status_update_time = datetime("now", "localtime") '
         sql += 'where id = ?'
         t = (self.title, self.episode, self.url, self.status, self.id)
         _database.execute(sql, t)
         _database.commit()
+    def _string_to_datetime(self, dtstring):
+        return datetime.strptime(dtstring, '%Y-%m-%d %H:%M:%S')
+    def get_status_update_datetime(self):
+        if self.status_update_time:
+            return self._string_to_datetime(self.status_update_time)
+        sql = 'select status_update_time where id = ?'
+        cursor = _database.cursor()
+        cursor.execute(sql, (self.id))
+        row = cursor.fetchone()
+        if row:
+            self.status_update_time = row[0]
+        else:
+            self.status_update_time = None
+        cursor.close()
+        if not self.satus_update_time:
+            return None
+        return self._string_to_datetime(self.status_update_time)
     def update_status(self, status):
         self.status = status
         self.update()
@@ -120,7 +160,7 @@ def connect_to_sqlite():
     c = sqlite3.connect(f)
     s = 'CREATE TABLE IF NOT EXISTS shows '
     s += '(id text primary key, title text, '
-    s += 'episode integer, url text, status text);'
+    s += 'episode integer, url text, status text, status_update_time text);'
     c.execute(s)
     return c
     
@@ -286,6 +326,19 @@ def download():
         send_xmpp(msg)
 
 ########################################
+def delete_old_shows():
+    """
+    Deletes shows from disk after number of days configured in cfg file
+    """
+    Delete shows 
+    logger = logging.getLogger()
+    retain_days = _config.getint('directories', 'retain_days')
+    if retain_days == 0:
+        return
+
+    logger.info('deleting downloaded shows')
+
+########################################
 def prowl(msg):
     if not _prowl_available:
         return
@@ -428,6 +481,7 @@ def main():
         get_wiadomosci(br, 'Wiadomosci')
     if opt_download:
         download()
+        #delete_old_shows()
     
     cleanup()
     
