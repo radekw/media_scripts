@@ -336,7 +336,7 @@ def remove_downloaded(br):
     """
     Removes shows from the website after they are downloaded
     """
-    if not _config.getbool('save_tv', 'remove_after_download'):
+    if not _config.getboolean('save_tv', 'remove_after_download'):
         return
 
     logger = logging.getLogger()
@@ -347,7 +347,6 @@ def remove_downloaded(br):
     logger.info('getting show listing')
     br.open('%s/%s' % (_url_site, '/STV/M/obj/user/usShowVideoArchive.cfm'))
     br.select_form(nr=0)
-
     tids_site = set()
     try:
         links = br.links(url_regex=r'TelecastID')
@@ -360,12 +359,15 @@ def remove_downloaded(br):
         if m:
             tids_site.add(m.group(1))
 
+    # intersect website shows with local shows
+    # and check the checkboxes
     shows = Shows(statuses=[Show.DOWNLOADED])
     for show in shows:
         if show.telecastid in tids_site:
             logger.info('removing %s' % show.titleD)
             br.find_control(name='lTelecastID').get(show.telecastid).selected = True
 
+    # submit form
     br.submit()
 
 ########################################
@@ -452,6 +454,9 @@ def delete_old_shows():
     for show in shows:
         try:
             (d, m, y) = show.date.split('-')
+            d = int(d)
+            m = int(m)
+            y = int(y)
         except:
             continue
         show_date = datetime.date(y, m, d)
@@ -604,10 +609,10 @@ def main():
     if opt_query:
         br = login()
         query(br)
+        remove_downloaded(br)
     if opt_download:
         download()
-        #remove_downloaded()
-        #delete_old_shows()
+        delete_old_shows()
     
     cleanup()
     
