@@ -15,10 +15,8 @@
 # limitations under the License.
  
 import os, shutil, sys, signal, subprocess, getopt, datetime
-import re, logging, sqlite3
-import urllib, urllib2
+import re, logging, sqlite3, urllib
 from ConfigParser import SafeConfigParser
-from stat import *
 import mechanize
 from hashlib import sha1
 from os import urandom
@@ -73,6 +71,12 @@ class Shows:
             show = Show(row[0], row[1], row[2], row[3], row[4], row[5])
             self.shows.append(show)
         cursor.close()
+    def __len__(self):
+        return len(self.shows)
+    def __getitem__(self, key):
+        return self.shows[key]
+    def __iter__(self):
+        return iter(self.shows)
 
 ########################################
 class Show:
@@ -114,7 +118,12 @@ class Show:
         _database.execute(sql, t)
         _database.commit()
     def _string_to_datetime(self, dtstring):
-        return datetime.strptime(dtstring, '%Y-%m-%d %H:%M:%S')
+        dt = None
+        try:
+            dt = datetime.datetime.strptime(dtstring, '%Y-%m-%d %H:%M:%S')
+        except:
+            dt = None
+        return dt
     def get_status_update_datetime(self):
         if self.status_update_time:
             return self._string_to_datetime(self.status_update_time)
@@ -267,18 +276,8 @@ def get_wiadomosci(br, title):
 ########################################
 def download():
     logger = logging.getLogger()
+    shows = Shows(statuses=[Show.NEW, Show.ERROR])
 
-    sql = 'select id, title, episode, url, status from shows '
-    sql += 'where status = "new" or status = "error" '
-    sql += 'order by title, episode'
-    cursor = _database.cursor()
-    cursor.execute(sql)
-    shows = []
-    for row in cursor:
-        show = Show(row[0], row[1], row[2], row[3], row[4])
-        shows.append(show)
-    cursor.close()
-    
     if not shows:
         logger.info('nothing to download')
         return
@@ -330,7 +329,6 @@ def delete_old_shows():
     """
     Deletes shows from disk after number of days configured in cfg file
     """
-    Delete shows 
     logger = logging.getLogger()
     retain_days = _config.getint('directories', 'retain_days')
     if retain_days == 0:
@@ -467,6 +465,11 @@ def main():
     
     signal.signal(signal.SIGINT, exit_handler)
     signal.signal(signal.SIGTERM, exit_handler)
+    
+    shows = Shows(statuses=[Show.NEW, Show.ERROR])
+    for show in shows:
+        print show.titleSE
+    sys.exit()
     
     if opt_query:
         br = login()

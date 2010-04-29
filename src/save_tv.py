@@ -20,10 +20,9 @@ It's quick, dirty, without much error checking, and without warranty.
 If it fails, PECH!
 """
 
-import os, shutil, sys, signal, subprocess, getopt, time, random, datetime
-import re, logging, urllib2, sqlite3
+import os, shutil, sys, signal, subprocess, getopt, time, datetime
+import re, logging, urllib2, sqlite3, random, stat
 from ConfigParser import SafeConfigParser
-from stat import *
 import mechanize
 from hashlib import sha1
 from os import urandom
@@ -54,7 +53,7 @@ def usage():
 class Shows:
     def __init__(self, statuses=[]):
         self.shows = []
-        sql = 'select id, title, date, time, url, telecastid, size, status, 
+        sql = 'select id, title, date, time, url, telecastid, size, status, '
         sql += 'status_update_time from shows '
         if statuses:
             sql += 'where '
@@ -69,6 +68,12 @@ class Shows:
                         row[4], row[5], row[6], row[7], row[8])
             self.shows.append(show)
         cursor.close()
+    def __len__(self):
+        return len(self.shows)
+    def __getitem__(self, key):
+        return self.shows[key]
+    def __iter__(self):
+        return iter(self.shows)
 
 ########################################
 class Show:
@@ -115,7 +120,12 @@ class Show:
         _database.execute(sql, t)
         _database.commit()
     def _string_to_datetime(self, dtstring):
-        return datetime.strptime(dtstring, '%Y-%m-%d %H:%M:%S')
+        dt = None
+        try:
+            dt = datetime.datetime.strptime(dtstring, '%Y-%m-%d %H:%M:%S')
+        except:
+            dt = None
+        return dt
     def get_status_update_datetime(self):
         if self.status_update_time:
             return self._string_to_datetime(self.status_update_time)
@@ -221,7 +231,7 @@ def login():
     br.select_form(nr=0)
     br['sUsername'] = _config.get('login', 'username')
     br['sPassword'] = _config.get('login', 'password')
-    res = br.submit()
+    br.submit()
     
     return br
 
@@ -350,42 +360,18 @@ def remove_downloaded(br):
         if m:
             tids_site.add(m.group(1))
 
-    # get telecastIDs from the database for all downloaded shows
-    # intersect them with downloadable IDs
-    sql = 'select id, title, date, time, url, telecastid, size, status from shows '
-    sql += 'where status = "downloaded" '
-    sql += 'order by date, time, title'
-    cursor = _database.cursor()
-    cursor.execute(sql)
-    shows = []
-    for row in cursor:
-        show = Show(row[0], row[1], row[2], row[3], 
-                    row[4], row[5], row[6], row[7])
-        shows.append(show)
-    cursor.close()
-    tids = set()
+    shows = Shows(statuses=[Show.DOWNLOADED])
     for show in shows:
         if show.telecastid in tids_site:
             logger.info('removing %s' % show.titleD)
-            br.find_control(name='lTelecastID').get(tid).selected = True
+            br.find_control(name='lTelecastID').get(show.telecastid).selected = True
 
     br.submit()
 
 ########################################
 def download():
     logger = logging.getLogger()
-    
-    sql = 'select id, title, date, time, url, telecastid, size, status from shows '
-    sql += 'where status = "new" or status = "error" '
-    sql += 'order by date, time, title'
-    cursor = _database.cursor()
-    cursor.execute(sql)
-    shows = []
-    for row in cursor:
-        show = Show(row[0], row[1], row[2], row[3], 
-                    row[4], row[5], row[6], row[7])
-        shows.append(show)
-    cursor.close()
+    shows = Shows(statuses=[Show.NEW, Show.ERROR])
     
     if not shows:
         logger.info('nothing to download')
@@ -404,7 +390,7 @@ def download():
         
         if os.path.exists(tmp_outfile):
             logger.info('%s tmp file already exists' % show.titleD)
-            filesize = os.stat(tmp_outfile)[ST_SIZE]
+            filesize = os.stat(tmp_outfile)[stat.ST_SIZE]
             if filesize >= show.size:
                 logger.info('%s size ok' % show.titleD)
                 try:
@@ -452,28 +438,14 @@ def delete_old_shows():
     """
     Deletes shows from disk after number of days configured in cfg file
     """
-    Delete shows 
     logger = logging.getLogger()
     retain_days = _config.getint('directories', 'retain_days')
     if retain_days == 0:
         return
 
     logger.info('deleting downloaded shows')
-
-    sql = 'select id, title, date, time, url, telecastid, size, status from shows '
-    sql += 'where status = "downloaded" '
-    sql += 'order by date, time, title'
-    cursor = _database.cursor()
-    cursor.execute(sql)
-    shows = []
-    for row in cursor:
-        show = Show(row[0], row[1], row[2], row[3], 
-                    row[4], row[5], row[6], row[7])
-        shows.append(show)
-    cursor.close()
-
     today = datetime.date.today()
-
+    shows = Shows(statuses=[Show.DOWNLOADED])
     for show in shows:
         try:
             (d, m, y) = show.date.split('-')
@@ -626,13 +598,19 @@ def main():
     signal.signal(signal.SIGINT, exit_handler)
     signal.signal(signal.SIGTERM, exit_handler)
     
+    shows = Shows(statuses=[Show.NEW, Show.ERROR])
+    for show in shows:
+        print show.titleD
+        print '%s: %s' % (show.status, show.get_status_update_datetime())
+    sys.exit()
+    
     if opt_query:
         br = login()
         query(br)
     if opt_download:
         download()
-        remove_downloaded()
-        delete_old_shows()
+        #remove_downloaded()
+        #delete_old_shows()
     
     cleanup()
     
