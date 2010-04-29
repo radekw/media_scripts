@@ -196,11 +196,15 @@ def connect_to_sqlite():
 ########################################
 def fix_db():
     """
-    TODO: implement
     Checks if sqlite database contains shows with status 'downloading'
     that are not being downloaded anymore (after crash)
     """
-    pass
+    now = datetime.datetime.now()
+    shows = Shows(statuses=[Show.DOWNLOADING])
+    for show in shows:
+        date_diff = now - show.get_status_update_datetime()
+        if (date_diff.seconds / 60 / 60) >= 6:
+            show.update_status(Show.ERROR)
 
 ########################################
 def deumlaut(s):
@@ -373,9 +377,8 @@ def remove_downloaded(br):
     now = datetime.datetime.now()
     for show in shows:
         if show.telecastid in tids_site:
-            status_update_dt = show.get_status_update_datetime()
-            date_diff = now - status_update_dt
-            if date_diff.days > 1:
+            date_diff = now - show.get_status_update_datetime()
+            if date_diff.days >= 1:
                 logger.info('removing %s' % show.titleD)
                 br.find_control(name='lTelecastID').get(show.telecastid).selected = True
 
@@ -462,8 +465,7 @@ def delete_old_shows():
     now = datetime.datetime.now()
     shows = Shows(statuses=[Show.DOWNLOADED])
     for show in shows:
-        status_update_dt = show.get_status_update_datetime()
-        date_diff = now - status_update_dt
+        date_diff = now - show.get_status_update_datetime()
         if date_diff.days > retain_days:
             outfile = show.get_storage_filename_path()
             logger.info('deleting %s' % show.titleD)
@@ -600,6 +602,7 @@ def main():
         sys.exit(1)
     
     _database = connect_to_sqlite()
+    fix_db()
     
     if not opt_query and not opt_download:
         opt_query = True

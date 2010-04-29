@@ -186,6 +186,19 @@ def connect_to_sqlite():
     return c
     
 ########################################
+def fix_db():
+    """
+    Checks if sqlite database contains shows with status 'downloading'
+    that are not being downloaded anymore (after crash)
+    """
+    now = datetime.datetime.now()
+    shows = Shows(statuses=[Show.DOWNLOADING])
+    for show in shows:
+        date_diff = now - show.get_status_update_datetime()
+        if (date_diff.seconds / 60 / 60) >= 6:
+            show.update_status(Show.ERROR)
+
+########################################
 def login():
     logger = logging.getLogger()
     br = mechanize.Browser()
@@ -352,8 +365,7 @@ def delete_old_shows():
     now = datetime.datetime.now()
     shows = Shows(statuses=[Show.DOWNLOADED])
     for show in shows:
-        status_update_dt = show.get_status_update_datetime()
-        date_diff = now - status_update_dt
+        date_diff = now - show.get_status_update_datetime()
         if date_diff.days > retain_days:
             outfile = show.get_storage_filename_path()
             logger.info('deleting %s' % show.titleSE)
@@ -489,6 +501,7 @@ def main():
         sys.exit(1)
     
     _database = connect_to_sqlite()
+    fix_db()
     
     if not opt_query and not opt_download:
         opt_query = True
