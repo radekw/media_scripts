@@ -466,11 +466,6 @@ def main():
     signal.signal(signal.SIGINT, exit_handler)
     signal.signal(signal.SIGTERM, exit_handler)
     
-    shows = Shows(statuses=[Show.NEW, Show.ERROR])
-    for show in shows:
-        print show.titleSE
-    sys.exit()
-    
     if opt_query:
         br = login()
         get_seriale(br, 'Klan')

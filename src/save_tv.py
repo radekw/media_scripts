@@ -598,12 +598,6 @@ def main():
     signal.signal(signal.SIGINT, exit_handler)
     signal.signal(signal.SIGTERM, exit_handler)
     
-    shows = Shows(statuses=[Show.NEW, Show.ERROR])
-    for show in shows:
-        print show.titleD
-        print '%s: %s' % (show.status, show.get_status_update_datetime())
-    sys.exit()
-    
     if opt_query:
         br = login()
         query(br)
