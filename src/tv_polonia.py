@@ -139,6 +139,18 @@ class Show:
         if not self.satus_update_time:
             return None
         return self._string_to_datetime(self.status_update_time)
+    def get_storage_dirname_path(self):
+        f = os.path.join(_config.get('directories', 'storage'),
+                         show.title)
+        return f
+    def get_storage_filename_path(self):
+        f = os.path.join(_config.get('directories', 'storage'),
+                         show.title, self.filename)
+        return f
+    def get_tmp_filename_path(self):
+        f = os.path.join(_config.get('directories', 'tmp'),
+                         self.filename)
+        return f
     def update_status(self, status):
         self.status = status
         self.update()
@@ -283,13 +295,11 @@ def download():
         return
 
     for show in shows:
-        outdir = os.path.join(_config.get('directories', 'storage'), 
-                               show.title)
+        outdir = show.get_storage_dirname_path()
         if not os.path.exists(outdir):
             os.mkdir(outdir)
-        outfile = os.path.join(outdir, show.filename)
-        tmp_outfile = os.path.join(_config.get('directories', 'tmp'), 
-                                   show.filename)
+        outfile = show.get_storage_filename_path()
+        tmp_outfile = show.get_tmp_filename_path()
 
         if os.path.exists(outfile):
             logger.info('%s already exists' % show.titleSE)
@@ -339,6 +349,23 @@ def delete_old_shows():
         return
 
     logger.info('deleting downloaded shows')
+    now = datetime.datetime.now()
+    shows = Shows(statuses=[Show.DOWNLOADED])
+    for show in shows:
+        status_update_dt = show.get_status_update_datetime()
+        date_diff = now - status_update_dt
+        if date_diff.days > retain_days:
+            outfile = show.get_storage_filename_path()
+            logger.info('deleting %s' % show.titleSE)
+            if os.path.exists(outfile):
+                try:
+                    os.unlink(outfile)
+                except:
+                    logger.error('could not delete %s' % show.titleSE)
+                    continue
+            else:
+                logger.debug('%s previously deleted' % show.titleSE)
+            show.update_status(Show.DELETED)
 
 ########################################
 def prowl(msg):
@@ -483,7 +510,7 @@ def main():
         get_wiadomosci(br, 'Wiadomosci')
     if opt_download:
         download()
-        #delete_old_shows()
+        delete_old_shows()
     
     cleanup()
     

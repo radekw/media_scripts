@@ -141,6 +141,14 @@ class Show:
         if not self.satus_update_time:
             return None
         return self._string_to_datetime(self.status_update_time)
+     def get_storage_filename_path(self):
+        f = os.path.join(_config.get('directories', 'storage'),
+                         self.filename)
+        return f
+    def get_tmp_filename_path(self):
+        f = os.path.join(_config.get('directories', 'tmp'),
+                         self.filename)
+        return f
     def update_status(self, status):
         self.status = status
         self.update()
@@ -362,10 +370,14 @@ def remove_downloaded(br):
     # intersect website shows with local shows
     # and check the checkboxes
     shows = Shows(statuses=[Show.DOWNLOADED])
+    now = datetime.datetime.now()
     for show in shows:
         if show.telecastid in tids_site:
-            logger.info('removing %s' % show.titleD)
-            br.find_control(name='lTelecastID').get(show.telecastid).selected = True
+            status_update_dt = show.get_status_update_datetime()
+            date_diff = now - status_update_dt
+            if date_diff.days > 1:
+                logger.info('removing %s' % show.titleD)
+                br.find_control(name='lTelecastID').get(show.telecastid).selected = True
 
     # submit form
     br.submit()
@@ -380,10 +392,8 @@ def download():
         return
     
     for show in shows:
-        outfile = os.path.join(_config.get('directories', 'storage'),
-                               show.filename)
-        tmp_outfile = os.path.join(_config.get('directories', 'tmp'),
-                                   show.filename)
+        outfile = show.get_storage_filename_path()
+        tmp_outfile = show.get_tmp_filename_path()
         
         if os.path.exists(outfile):
             logger.info('%s already exists' % show.titleD)
@@ -449,21 +459,13 @@ def delete_old_shows():
         return
 
     logger.info('deleting downloaded shows')
-    today = datetime.date.today()
+    now = datetime.datetime.now()
     shows = Shows(statuses=[Show.DOWNLOADED])
     for show in shows:
-        try:
-            (d, m, y) = show.date.split('-')
-            d = int(d)
-            m = int(m)
-            y = int(y)
-        except:
-            continue
-        show_date = datetime.date(y, m, d)
-        date_diff = today - show_date
+        status_update_dt = show.get_status_update_datetime()
+        date_diff = now - status_update_dt
         if date_diff.days > retain_days:
-            outfile = os.path.join(_config.get('directories', 'storage'),
-                                   show.filename)
+            outfile = show.get_storage_filename_path()
             logger.info('deleting %s' % show.titleD)
             if os.path.exists(outfile):
                 try:
