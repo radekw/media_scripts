@@ -407,7 +407,10 @@ def download():
         f.close()
         wget_log = os.path.join(_config.get('directories', 'tmp'), 'wget.log')
         user_agent = _config.get('browser', 'useragent')
-        ret = os.system('wget -c %s -O %s -o %s -U "%s"' % (show.url, 
+        wget = 'wget'
+        if _config.has_option('directories', 'wget'):
+            wget = os.path.join(_config.get('directories', 'wget'), 'wget')
+        ret = os.system('%s -c "%s" -O %s -o %s -U "%s"' % (wget, show.url, 
                                                             tmp_outfile, 
                                                             wget_log, 
                                                             user_agent));

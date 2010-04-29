@@ -302,8 +302,12 @@ def download():
         show.update_status(Show.DOWNLOADING)
         mplayer_log = os.path.join(_config.get('directories', 'tmp'), 
                                    'mplayer.log')
-        ret = os.system('mplayer -dumpstream %s -dumpfile %s >%s 2>&1' % \
-                        (show.url, tmp_outfile, mplayer_log));
+        mplayer = 'mplayer'
+        if _config.has_option('directories', 'mplayer'):
+            mplayer = os.path.join(_config.get('directories', 'mplayer'), 
+                                   'mplayer')
+        ret = os.system('%s -dumpstream "%s" -dumpfile %s >%s 2>&1' % \
+                        (mplayer, show.url, tmp_outfile, mplayer_log));
         if os.WIFEXITED(ret):
             if os.WEXITSTATUS(ret) != 0:
                 logger.error('mplayer exited with error')
