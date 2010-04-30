@@ -141,7 +141,7 @@ class Show:
         if not self.satus_update_time:
             return None
         return self._string_to_datetime(self.status_update_time)
-     def get_storage_filename_path(self):
+    def get_storage_filename_path(self):
         f = os.path.join(_config.get('directories', 'storage'),
                          self.filename)
         return f

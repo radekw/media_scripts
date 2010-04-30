@@ -141,11 +141,11 @@ class Show:
         return self._string_to_datetime(self.status_update_time)
     def get_storage_dirname_path(self):
         f = os.path.join(_config.get('directories', 'storage'),
-                         show.title)
+                         self.title)
         return f
     def get_storage_filename_path(self):
         f = os.path.join(_config.get('directories', 'storage'),
-                         show.title, self.filename)
+                         self.title, self.filename)
         return f
     def get_tmp_filename_path(self):
         f = os.path.join(_config.get('directories', 'tmp'),
