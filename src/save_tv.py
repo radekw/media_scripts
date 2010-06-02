@@ -53,7 +53,7 @@ def usage():
 class Shows:
     def __init__(self, statuses=[]):
         self.shows = []
-        sql = 'select id, title, date, time, url, telecastid, size, status, '
+        sql = 'select id, title, date, time, extension, url, telecastid, size, status, '
         sql += 'status_update_time from shows '
         if statuses:
             sql += 'where '
@@ -64,8 +64,8 @@ class Shows:
         cursor = _database.cursor()
         cursor.execute(sql)
         for row in cursor:
-            show = Show(row[0], row[1], row[2], row[3], 
-                        row[4], row[5], row[6], row[7], row[8])
+            show = Show(row[0], row[1], row[2], row[3], row[4], 
+                        row[5], row[6], row[7], row[8], row[9])
             self.shows.append(show)
         cursor.close()
     def __len__(self):
@@ -85,37 +85,44 @@ class Show:
     DOWNLOADING = 'downloading'
     ERROR = 'error'
     DELETED = 'deleted'
-    def __init__(self, id, title, dt, tm, url, telecastid, size, status, 
+    def __init__(self, id, title, dt, tm, ext, url, telecastid, size, status, 
                  status_update_time=None):
         if id == None:
             self.id = generate_unique_id('%s%s%s' % (title, dt, tm))
         else:
             self.id = id
-        self.title = title
+        self.title = title.replace(' ', '_')
         self.date = dt
-        self.time = tm
+        self.time = tm.replace(':', '')
+        self.file_extension = ext
         self.url = url
         self.telecastid = telecastid
         self.size = int(size)
         self.status = status
         self.status_update_time = status_update_time
-        self.titleD = '%s.%s' % (title.replace(' ', '.'), dt)
-        self.filename = '%s.avi' % self.titleD
+        self.titleD = self.get_showtitle()
+        self.filename = self.get_filename()
+    def get_showtitle(self):
+        return '%s.%s.%s' % (self.title, self.date, self.time)
+    def get_filename(self):
+        return '%s.%s' % (self.get_showtitle(), self.file_extension)
     def insert(self):
         sql = 'insert or ignore into shows '
-        sql += '(id, title, date, time, url, telecastid, size, status, status_update_time) '
-        sql += 'values (?, ?, ?, ?, ?, ?, ?, ?, datetime("now", "localtime"))'
-        t = (self.id, self.title, self.date, self.time, 
+        sql += '(id, title, date, time, extension, url, telecastid, '
+        sql += 'size, status, status_update_time) '
+        sql += 'values (?, ?, ?, ?, ?, ?, ?, ?, ?, '
+        sql += 'datetime("now", "localtime"))'
+        t = (self.id, self.title, self.date, self.time, self.file_extension, 
              self.url, self.telecastid, self.size, self.status)
         _database.execute(sql, t)
         _database.commit()
     def update(self):
         sql = 'update shows '
-        sql += 'set title = ?, date = ?, time = ?, '
+        sql += 'set title = ?, date = ?, time = ?, extension = ?, '
         sql += 'url = ?, telecastid = ?, size = ?, status = ?, '
         sql += 'status_update_time = datetime("now", "localtime") '
         sql += 'where id = ?'
-        t = (self.title, self.date, self.time, self.url, 
+        t = (self.title, self.date, self.time, self.file_extension, self.url, 
              self.telecastid, self.size, self.status, self.id)
         _database.execute(sql, t)
         _database.commit()
@@ -188,7 +195,7 @@ def connect_to_sqlite():
     c = sqlite3.connect(f)
     s = 'CREATE TABLE IF NOT EXISTS shows '
     s += '(id text primary key, title text, '
-    s += 'date text, time text, url text, telecastid text, '
+    s += 'date text, time text, extension text, url text, telecastid text, '
     s += 'size integer, status text, status_update_time text);'
     c.execute(s)
     return c
@@ -272,7 +279,7 @@ def query(br):
     # download URL
     logger.info('getting show links')
     links = []
-    re_tid = re.compile(r'.+TelecastID=(\d+)$')
+    re_tid = re.compile(r'.+TelecastID=(\d+)')
     re_url = re.compile(r".+'(http://.+dl)'.+", re.S)
     for show in shows:
         logger.debug(show)
@@ -315,7 +322,7 @@ def query(br):
     # file name, file size, date, time
     # Does not download the file just yet
     logger.info('getting show details')
-    re_tdt = re.compile(r'(.+)_{1,2}(\d{2}-\d{2}-\d{4})_(\d{2})(\d{2})')
+    re_tdt = re.compile(r'(.+)_{1,2}(\d{2})-(\d{2})-(\d{4})_(\d{2})(\d{2})\.(.+)')
     for link, tid in links:
         req = urllib2.Request(link, headers={'User-agent': 
                                              _config.get('browser', 'useragent')})
@@ -332,15 +339,17 @@ def query(br):
         match = re_tdt.match(filename)
         if match:
             title = match.group(1)
-            dt = match.group(2)
-            tm = '%s:%s' % (match.group(3), match.group(4))
+            dt = '%s-%s-%s' % (match.group(4), match.group(3), match.group(2))
+            tm = '%s%s' % (match.group(5), match.group(6))
+            ext = match.group(7)
         else:
             title = filename
-            dt = '00-00-00'
-            tm = '00:00'
-        s = Show(None, title, dt, tm, link, tid, size, Show.NEW)
+            dt = '0000-00-00'
+            tm = '0000'
+            ext = 'mp4'
+        s = Show(None, title, dt, tm, ext, link, tid, size, Show.NEW)
         logger.info('%s' % s.titleD)
-        logger.debug('%s' % s.url)
+        logger.debug('url: %s' % s.url)
         s.insert()
 
 ########################################
@@ -348,7 +357,9 @@ def remove_downloaded(br):
     """
     Removes shows from the website after they are downloaded
     """
-    if not _config.getboolean('save_tv', 'remove_after_download'):
+    if not _config.has_option('save_tv', 'remove_after_download'):
+        return
+    elif not _config.getboolean('save_tv', 'remove_after_download'):
         return
 
     logger = logging.getLogger()
@@ -365,7 +376,7 @@ def remove_downloaded(br):
     except mechanize._mechanize.LinkNotFoundError:
         logger.error('TelecastID links not found')
         return
-    re_tid = re.compile(r'.+TelecastID=(\d+)$')
+    re_tid = re.compile(r'.+TelecastID=(\d+)')
     for link in links:
         m = re_tid.match(link.url)
         if m:
@@ -380,7 +391,12 @@ def remove_downloaded(br):
             date_diff = now - show.get_status_update_datetime()
             if date_diff.days >= 1:
                 logger.info('removing %s' % show.titleD)
-                br.find_control(name='lTelecastID').get(show.telecastid).selected = True
+                try:
+                    c = br.find_control(name='lTelecastID')
+                    c.get(show.telecastid).selected = True
+                except:
+                    logger.error('Failed to select checkbox for %s' % show.telecastid)
+                    continue
 
     # submit form
     br.submit()
