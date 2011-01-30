@@ -36,9 +36,10 @@ _shows = {'Klan': 33,
           'Na Dobre i na Zle': 50, 
           'M jak Milosc': 51, 
           'Barwy Szczescia': 297, 
+          'Milosc nad Rozlewiskiem': 396, 
           'Ojciec Mateusz': 301, 
           'Czas Honoru': 304, 
-          'Rajskie Klimaty': 372, 
+          'Sprawiedliwi': 389, 
           'Teleexpress': 61, 
           'Wiadomosci': 61}
 
@@ -315,9 +316,10 @@ def download():
         tmp_outfile = show.get_tmp_filename_path()
 
         if os.path.exists(outfile):
-            logger.info('%s already exists' % show.titleSE)
-            show.update_status(Show.DOWNLOADED)
-            continue
+            os.unlink(outfile)
+            #logger.info('%s already exists' % show.titleSE)
+            #show.update_status(Show.DOWNLOADED)
+            #continue
         if os.path.exists(tmp_outfile):
             os.unlink(tmp_outfile)
 
@@ -329,7 +331,7 @@ def download():
         if _config.has_option('directories', 'mplayer'):
             mplayer = os.path.join(_config.get('directories', 'mplayer'), 
                                    'mplayer')
-        ret = os.system('%s -dumpstream "%s" -dumpfile %s >%s 2>&1' % \
+        ret = os.system('%s -v -nocache -dumpstream "%s" -dumpfile %s >%s 2>&1' % \
                         (mplayer, show.url, tmp_outfile, mplayer_log));
         if os.WIFEXITED(ret):
             if os.WEXITSTATUS(ret) != 0:
@@ -340,16 +342,30 @@ def download():
             logger.error('mplayer died')
             show.update_status(Show.ERROR)
             return
-        os.system('touch %s' % tmp_outfile)
-        os.chmod(tmp_outfile, 0644)
-        try:
-            shutil.move(tmp_outfile, outfile)
-        except:
-            logger.error('cannot move downloaded file')
-        show.update_status(Show.DOWNLOADED)
-        msg = 'Downloaded %s' % show.titleSE
-        prowl(msg)
-        send_xmpp(msg)
+        
+        # check mplayer log for errors
+        error = False
+        lf = open(mplayer_log, 'r')
+        for l in lf.readlines():
+            if l.find('Error while reading network stream') >= 0:
+                error = True
+        lf.close()
+        
+        if error:
+            show.update_status(Show.ERROR)
+            logger.error('mplayer error downloading %s' % show.titleSE)
+            os.unlink(tmp_outfile)
+        else:
+            os.system('touch %s' % tmp_outfile)
+            os.chmod(tmp_outfile, 0644)
+            try:
+                shutil.move(tmp_outfile, outfile)
+            except:
+                logger.error('cannot move downloaded file')
+            show.update_status(Show.DOWNLOADED)
+            msg = 'Downloaded %s' % show.titleSE
+            prowl(msg)
+            send_xmpp(msg)
 
 ########################################
 def delete_old_shows():
@@ -516,9 +532,10 @@ def main():
         get_seriale(br, 'M jak Milosc')
         get_seriale(br, 'Na Dobre i na Zle')
         get_seriale(br, 'Barwy Szczescia')
+        get_seriale(br, 'Milosc nad Rozlewiskiem')
         get_seriale(br, 'Czas Honoru')
         get_seriale(br, 'Ojciec Mateusz')
-        get_seriale(br, 'Rajskie Klimaty')
+        get_seriale(br, 'Sprawiedliwi')
         get_wiadomosci(br, 'Teleexpress')
         get_wiadomosci(br, 'Wiadomosci')
     if opt_download:
