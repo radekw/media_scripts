@@ -51,15 +51,23 @@ def usage():
 
 ########################################
 class Shows:
-    def __init__(self, statuses=[]):
+    def __init__(self, tid=None, statuses=[]):
         self.shows = []
         sql = 'select id, title, date, time, extension, url, telecastid, size, status, '
         sql += 'status_update_time from shows '
-        if statuses:
+        if tid or statuses:
             sql += 'where '
-            for s in statuses:
-                sql += 'status = "%s" or ' % s
-            sql = sql.rstrip('or ')
+            if tid:
+                sql += 'telecastid = "%s" ' % tid
+            if statuses:
+                if tid:
+                    sql += 'and ('
+                for s in statuses:
+                    sql += 'status = "%s" or ' % s
+                sql = sql.rstrip('or ')
+                if tid:
+                    sql += ')'
+                sql += ' '
         sql += 'order by status_update_time'
         cursor = _database.cursor()
         cursor.execute(sql)
@@ -246,7 +254,11 @@ def login():
     br.addheaders = [('User-agent', _config.get('browser', 'useragent'))]
 
     logger.info('logging on')
-    br.open('%s/%s' % (_url_site, '/STV/S/obj/user/usShowLogin.cfm'))
+    try:
+        br.open('%s/%s' % (_url_site, '/STV/S/obj/user/usShowLogin.cfm'))
+    except:
+        logger.error('could not access login page')
+        return None
     br.select_form(nr=0)
     br['sUsername'] = _config.get('login', 'username')
     br['sPassword'] = _config.get('login', 'password')
@@ -262,18 +274,29 @@ def query(br):
     logger = logging.getLogger()
     random.seed()
     
+    if _config.has_option('save_tv', 'use_cut_list'):
+        use_cut_list = _config.getboolean('save_tv', 'use_cut_list')
+    else:
+        use_cut_list = False
+    
     # Open 'Mein Videoarchiv' and find all links that contain TelecastID
     # Store all links in shows list
     logger.info('getting show listing')
     shows = []
-    br.open('%s/%s' % (_url_site, '/STV/M/obj/user/usShowVideoArchive.cfm'))
+    try:
+        br.open('%s/%s' % (_url_site, '/STV/M/obj/user/usShowVideoArchive.cfm'))
+    except:
+        logger.error('could not get show listing')
+        return
     try:
         links = br.links(url_regex=r'TelecastID')
     except mechanize._mechanize.LinkNotFoundError:
         logger.error('TelecastID links not found')
         return
     for link in links:
-        shows.append('%s/%s' % (_url_site, link.url))
+        u = '%s/%s' % (_url_site, link.url)
+        logger.debug('found %s' % u)
+        shows.append(u)
     
     # Get TelecastID out of every link and access web service to obtain
     # download URL
@@ -282,48 +305,60 @@ def query(br):
     re_tid = re.compile(r'.+TelecastID=(\d+)')
     re_url = re.compile(r".+'(http://.+dl)'.+", re.S)
     for show in shows:
-        logger.debug(show)
         tid = None
-        url = None
         m = re_tid.match(show)
         if m:
             tid = m.group(1)
         else:
             continue
         if tid:
-            logger.debug('found tid: %s' % tid)
-            ts = '%s_%s%s' % (random.randint(1000,9999), 
-                              str(time.time())[:10], 
-                              random.randint(100, 999))
-            u = '%s/%s' % (_url_site, 
-                         '/STV/M/obj/cRecordOrder/croGetDownloadUrl.cfm')
-            u += '?null.GetDownloadUrl'
-            u += '&=&ajax=true'
-            u += '&c0-id=%s' % ts
-            u += '&c0-methodName=GetDownloadUrl'
-            u += '&c0-param0=number%%3A%s' % tid
-            u += '&c0-param1=number%3A0'
-            u += '&c0-param2=boolean%3Afalse'
-            u += '&c0-scriptName=null'
-            u += '&callCount=1'
-            u += '&clientAuthenticationKey='
-            u += '&xml=true'
-            logger.debug('url getter url: %s' % u)
-            ret = br.open(u)
-            html = ret.read()
-            m = re_url.match(html)
-            if m:
-                url = m.group(1)
-                logger.debug('found url: %s' % url)
-        if tid and url:
-            links.append((url, tid))
+            show = Shows(tid=tid)
+            if show:
+                logger.debug('tid %s: already exists in database' % tid)
+                continue
+            else:
+                logger.debug('tid %s: getting link' % tid)
+                ts = '%s_%s%s' % (random.randint(1000,9999), 
+                                  str(time.time())[:10], 
+                                  random.randint(100, 999))
+                u = '%s/%s' % (_url_site, 
+                             '/STV/M/obj/cRecordOrder/croGetDownloadUrl.cfm')
+                u += '?null.GetDownloadUrl'
+                u += '&=&ajax=true'
+                u += '&c0-id=%s' % ts
+                u += '&c0-methodName=GetDownloadUrl'
+                u += '&c0-param0=number%%3A%s' % tid
+                if use_cut_list:
+                    u += '&c0-param1=number%3A1'
+                    u += '&c0-param2=boolean%3Atrue'
+                else:
+                    u += '&c0-param1=number%3A0'
+                    u += '&c0-param2=boolean%3Afalse'
+                u += '&c0-scriptName=null'
+                u += '&callCount=1'
+                u += '&clientAuthenticationKey='
+                u += '&xml=true'
+                logger.debug('tid %s: getter link: %s' % (tid, u))
+                try:
+                    ret = br.open(u)
+                except:
+                    logger.error('tid %s: could not get show link' % tid)
+                    continue
+                html = ret.read()
+                m = re_url.match(html)
+                if m:
+                    link = m.group(1)
+                    links.append((tid, link))
+                    logger.debug('tid %s: url: %s' % (tid, link))
+                else:
+                    logger.error('tid %s: no url found' % tid)
     
     # Only connect to download URL just to get file information such as
     # file name, file size, date, time
     # Does not download the file just yet
     logger.info('getting show details')
     re_tdt = re.compile(r'(.+)_{1,2}(\d{2})-(\d{2})-(\d{4})_(\d{2})(\d{2})\.(.+)')
-    for link, tid in links:
+    for tid, link in links:
         req = urllib2.Request(link, headers={'User-agent': 
                                              _config.get('browser', 'useragent')})
         doc = urllib2.urlopen(req)
@@ -348,8 +383,8 @@ def query(br):
             tm = '0000'
             ext = 'mp4'
         s = Show(None, title, dt, tm, ext, link, tid, size, Show.NEW)
-        logger.info('%s' % s.titleD)
-        logger.debug('url: %s' % s.url)
+        logger.info('tid %s: title: %s' % (tid, s.titleD))
+        logger.debug('tid %s: url: %s' % (tid, s.url))
         s.insert()
 
 ########################################
@@ -368,7 +403,11 @@ def remove_downloaded(br):
     # Open 'Mein Videoarchiv'
     # get telecastIDs for downloadable shows
     logger.info('getting show listing')
-    br.open('%s/%s' % (_url_site, '/STV/M/obj/user/usShowVideoArchive.cfm'))
+    try:
+        br.open('%s/%s' % (_url_site, '/STV/M/obj/user/usShowVideoArchive.cfm'))
+    except:
+        logger.error('could not get show listing')
+        return
     br.select_form(nr=0)
     tids_site = set()
     try:
@@ -395,7 +434,7 @@ def remove_downloaded(br):
                     c = br.find_control(name='lTelecastID')
                     c.get(show.telecastid).selected = True
                 except:
-                    logger.error('Failed to select checkbox for %s' % show.telecastid)
+                    logger.error('failed to select checkbox for %s' % show.telecastid)
                     continue
 
     # submit form
@@ -441,27 +480,50 @@ def download():
         wget = 'wget'
         if _config.has_option('directories', 'wget'):
             wget = os.path.join(_config.get('directories', 'wget'), 'wget')
-        ret = os.system('%s -c "%s" -O %s -o %s -U "%s"' % (wget, show.url, 
-                                                            tmp_outfile, 
-                                                            wget_log, 
-                                                            user_agent));
-        if os.WIFEXITED(ret):
-            if os.WEXITSTATUS(ret) != 0:
-                logger.error('wget exited with error')
-                show.update_status(Show.ERROR)
-                return
+        
+        cmd = '%s -c "%s" -O %s -o %s -U "%s"' % (wget, show.url, tmp_outfile, 
+                                                  wget_log, user_agent)
+        
+        if _config.has_option('wget', 'timeout'):
+            timeout = _config.getint('wget', 'timeout')
         else:
+            timeout = 0
+        
+        p = subprocess.Popen(cmd, shell=True)
+        start_time = time.time()
+        while True:
+            if p.poll() == None:
+                time.sleep(1)
+                if timeout:
+                    if (time.time() - start_time) > timeout:
+                        logger.error('wget timeout - killing')
+                        p.kill()
+                        break
+            else:
+                logger.debug('wget exited')
+                break
+        
+        ret = p.returncode
+        if ret > 0:
+            logger.error('wget exited with error')
+            show.update_status(Show.ERROR)
+            return
+        elif ret < 0:
             logger.error('wget died')
             show.update_status(Show.ERROR)
             return
+        
         os.system('touch %s' % tmp_outfile)
+        
         os.chmod(tmp_outfile, 0644)
+        
         try:
             shutil.move(tmp_outfile, outfile)
         except:
             logger.error('cannot move downloaded file')
             show.update_status(Show.ERROR)
             return
+        
         show.update_status(Show.DOWNLOADED)
         msg = 'Downloaded %s' % show.titleD
         prowl(msg)
@@ -629,8 +691,9 @@ def main():
     
     if opt_query:
         br = login()
-        query(br)
-        remove_downloaded(br)
+        if br:
+            query(br)
+            remove_downloaded(br)
     if opt_download:
         download()
         delete_old_shows()
