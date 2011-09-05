@@ -400,26 +400,26 @@ def remove_downloaded(br):
     logger = logging.getLogger()
     logger.info('removing downloaded shows from the website')
 
-    # Open 'Mein Videoarchiv'
-    # get telecastIDs for downloadable shows
+    # Open 'Mein Videoarchiv' and get telecastIDs for downloadable shows
     logger.info('getting show listing')
     try:
         br.open('%s/%s' % (_url_site, '/STV/M/obj/user/usShowVideoArchive.cfm'))
     except:
         logger.error('could not get show listing')
         return
-    br.select_form(nr=0)
-    tids_site = set()
     try:
         links = br.links(url_regex=r'TelecastID')
     except mechanize._mechanize.LinkNotFoundError:
         logger.error('TelecastID links not found')
         return
+    tids_site = set()
     re_tid = re.compile(r'.+TelecastID=(\d+)')
     for link in links:
         m = re_tid.match(link.url)
         if m:
             tids_site.add(m.group(1))
+
+    br.select_form(nr=1)
 
     # intersect website shows with local shows
     # and check the checkboxes
@@ -429,7 +429,7 @@ def remove_downloaded(br):
         if show.telecastid in tids_site:
             date_diff = now - show.get_status_update_datetime()
             if date_diff.days >= 1:
-                logger.info('removing %s' % show.titleD)
+                logger.info('removing %s: %s' % (show.telecastid, show.titleD))
                 try:
                     c = br.find_control(name='lTelecastID')
                     c.get(show.telecastid).selected = True
