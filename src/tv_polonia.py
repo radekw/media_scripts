@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
  
-import os, shutil, sys, signal, subprocess, getopt, datetime
+import os, shutil, sys, signal, subprocess, getopt, datetime, time
 import re, logging, sqlite3, urllib
 from ConfigParser import SafeConfigParser
 import mechanize
@@ -36,10 +36,9 @@ _shows = {'Klan': 33,
           'Na Dobre i na Zle': 50, 
           'M jak Milosc': 51, 
           'Barwy Szczescia': 297, 
-          'Milosc nad Rozlewiskiem': 396, 
           'Ojciec Mateusz': 301, 
           'Czas Honoru': 304, 
-          'Sprawiedliwi': 389, 
+          'Londynczycy': 399, 
           'Teleexpress': 61, 
           'Wiadomosci': 61}
 
@@ -328,17 +327,41 @@ def download():
         mplayer_log = os.path.join(_config.get('directories', 'tmp'), 
                                    'mplayer.log')
         mplayer = 'mplayer'
-        if _config.has_option('directories', 'mplayer'):
-            mplayer = os.path.join(_config.get('directories', 'mplayer'), 
-                                   'mplayer')
-        ret = os.system('%s -v -nocache -dumpstream "%s" -dumpfile %s >%s 2>&1' % \
-                        (mplayer, show.url, tmp_outfile, mplayer_log));
-        if os.WIFEXITED(ret):
-            if os.WEXITSTATUS(ret) != 0:
-                logger.error('mplayer exited with error')
-                show.update_status(Show.ERROR)
-                return
+        if _config.has_option('mplayer', 'path'):
+            mplayer = os.path.join(_config.get('mplayer', 'path'), 'mplayer')
+        
+        mplayer_opts = '-v -nocache'
+        if _config.has_option('mplayer', 'opts'):
+            mplayer_opts = _config.get('mplayer', 'opts')
+            
+        if _config.has_option('mplayer', 'timeout'):
+            timeout = _config.getint('mplayer', 'timeout')
         else:
+            timeout = 0
+        
+        cmd = '%s %s -dumpstream "%s" -dumpfile %s >%s 2>&1' % \
+            (mplayer, mplayer_opts, show.url, tmp_outfile, mplayer_log)
+        
+        p = subprocess.Popen(cmd, shell=True) 
+        start_time = time.time()
+        while True:
+            if p.poll() == None:
+                time.sleep(1)
+                if timeout:
+                    if (time.time() - start_time) > timeout:
+                        logger.error('mplayer timeout - killing')
+                        p.kill()
+                        break
+            else:
+                logger.debug('mplayer exited')
+                break
+        
+        ret = p.returncode
+        if ret > 0:
+            logger.error('mplayer exited with error')
+            show.update_status(Show.ERROR)
+            return
+        elif ret < 0:
             logger.error('mplayer died')
             show.update_status(Show.ERROR)
             return
@@ -528,16 +551,15 @@ def main():
     
     if opt_query:
         br = login()
-        get_seriale(br, 'Klan')
+        #get_seriale(br, 'Klan')
         get_seriale(br, 'M jak Milosc')
         get_seriale(br, 'Na Dobre i na Zle')
         get_seriale(br, 'Barwy Szczescia')
-        get_seriale(br, 'Milosc nad Rozlewiskiem')
-        get_seriale(br, 'Czas Honoru')
+        #get_seriale(br, 'Czas Honoru')
         get_seriale(br, 'Ojciec Mateusz')
-        get_seriale(br, 'Sprawiedliwi')
-        get_wiadomosci(br, 'Teleexpress')
-        get_wiadomosci(br, 'Wiadomosci')
+        #get_seriale(br, 'Londynczycy')
+        #get_wiadomosci(br, 'Teleexpress')
+        #get_wiadomosci(br, 'Wiadomosci')
     if opt_download:
         download()
         delete_old_shows()
