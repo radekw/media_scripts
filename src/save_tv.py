@@ -293,8 +293,11 @@ def query(br):
     except mechanize._mechanize.LinkNotFoundError:
         logger.error('TelecastID links not found')
         return
+    links_set = set()
     for link in links:
-        u = '%s/%s' % (_url_site, link.url)
+        links_set.add(link.url)
+    for link in links_set:
+        u = '%s/%s' % (_url_site, link)
         logger.debug('found %s' % u)
         shows.append(u)
     
@@ -329,7 +332,7 @@ def query(br):
                 u += '&c0-methodName=GetDownloadUrl'
                 u += '&c0-param0=number%%3A%s' % tid
                 if use_cut_list:
-                    u += '&c0-param1=number%3A1'
+                    u += '&c0-param1=number%3A0'
                     u += '&c0-param2=boolean%3Atrue'
                 else:
                     u += '&c0-param1=number%3A0'
@@ -357,7 +360,7 @@ def query(br):
     # file name, file size, date, time
     # Does not download the file just yet
     logger.info('getting show details')
-    re_tdt = re.compile(r'(.+)_{1,2}(\d{2})-(\d{2})-(\d{4})_(\d{2})(\d{2})\.(.+)')
+    re_tdt = re.compile(r'(.+)_{1,2}(\d{2,4})-(\d{2})-(\d{2,4})_(\d{2})(\d{2})\.(.+)')
     for tid, link in links:
         req = urllib2.Request(link, headers={'User-agent': 
                                              _config.get('browser', 'useragent')})
@@ -374,7 +377,10 @@ def query(br):
         match = re_tdt.match(filename)
         if match:
             title = match.group(1)
-            dt = '%s-%s-%s' % (match.group(4), match.group(3), match.group(2))
+            if len(match.group(2)) == 4:
+                dt = '%s-%s-%s' % (match.group(2), match.group(3), match.group(4))
+            else:
+                dt = '%s-%s-%s' % (match.group(4), match.group(3), match.group(2))
             tm = '%s%s' % (match.group(5), match.group(6))
             ext = match.group(7)
         else:
