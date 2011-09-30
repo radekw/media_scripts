@@ -360,7 +360,10 @@ def query(br):
     # file name, file size, date, time
     # Does not download the file just yet
     logger.info('getting show details')
-    re_tdt = re.compile(r'(.+)_{1,2}(\d{2,4})-(\d{2})-(\d{2,4})_(\d{2})(\d{2})\.(.+)')
+    # title_YYYY-MM-DD_HHMM.ext
+    # title_DD-MM-YYYY_HHMM.ext
+    # title_YYYY-MM-DD_HHMM_USERID.ext
+    re_tdt = re.compile(r'(.+)_{1,2}(\d{2,4})-(\d{2})-(\d{2,4})_(\d{2})(\d{2})(_\d{,6})?\.(.+)')
     for tid, link in links:
         req = urllib2.Request(link, headers={'User-agent': 
                                              _config.get('browser', 'useragent')})
