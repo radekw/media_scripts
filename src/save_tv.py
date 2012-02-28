@@ -306,7 +306,7 @@ def query(br):
     logger.info('getting show links')
     links = []
     re_tid = re.compile(r'.+TelecastID=(\d+)')
-    re_url = re.compile(r".+'(http://.+dl)'.+", re.S)
+    re_url = re.compile(r".+'(http://.+dl)&.+", re.S)
     for show in shows:
         tid = None
         m = re_tid.match(show)
