@@ -306,7 +306,7 @@ def query(br):
     logger.info('getting show links')
     links = []
     re_tid = re.compile(r'.+TelecastID=(\d+)')
-    re_url = re.compile(r".+'(http://.+dl)&.+", re.S)
+    re_url = re.compile(r".+'(http://.+dl(&/w+=\w+)?)'.+", re.S)
     for show in shows:
         tid = None
         m = re_tid.match(show)
@@ -348,6 +348,7 @@ def query(br):
                     logger.error('tid %s: could not get show link' % tid)
                     continue
                 html = ret.read()
+                logger.debug(html)
                 m = re_url.match(html)
                 if m:
                     link = m.group(1)
