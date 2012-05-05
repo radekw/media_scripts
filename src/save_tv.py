@@ -386,7 +386,7 @@ def query(br):
             else:
                 dt = '%s-%s-%s' % (match.group(4), match.group(3), match.group(2))
             tm = '%s%s' % (match.group(5), match.group(6))
-            ext = match.group(7)
+            ext = match.group(8)
         else:
             title = filename
             dt = '0000-00-00'
